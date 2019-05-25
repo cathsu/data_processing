@@ -1,20 +1,29 @@
-from DataFrames import MyDataFrame, ExcelDataFrame, MappedExcelDataFrame
+from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
-from datetime import datetime, timedelta
+from DataFrames import MyDataFrame, ExcelDataFrame, MappedExcelDataFrame
+
+
 
 class CSVDataFrame(MyDataFrame): 
     """
     Extends MyDataFrame to read a CSV into a pandas dataframe. 
 
-    Attributes: 
-    mapped_settings (MappedExcelDataFrame): Contains the mapped settings in the configuration file
-    general_settings (ExcelDataFrame): Contains the general settings of the configuration file  
+    Attributes
+    ----------
+    file_name : str
+        Name of file to be read into CSV 
+    df : pd.DataFrame
+        Stores the data contained in the file 
+    mapped_settings : MappedExcelDataFrame
+        Contains the mapped settings in the configuration file
+    general_settings : ExcelDataFrame
+        Contains the general settings of the configuration file  
     """
 
-    def __init__(self,file_name: str, df: pd.DataFrame, mapped_settings: MappedExcelDataFrame, general_settings: ExcelDataFrame) -> None: 
+    def __init__(self,file_name, df, mapped_settings, general_settings): 
         super().__init__(file_name, df)
         self.mapped_settings = mapped_settings
         self.general_settings = general_settings
@@ -82,7 +91,7 @@ class CSVDataFrame(MyDataFrame):
         
         # Search for the columns that have a PM time. (Note: Excel convert str times with a PM time into 
         # military time. For example, 1:27 PM is converted into 13:27. 
-        datetime_str_columns = self._search_for_pm_times()
+        datetime_str_columns = self._search_for_military_times()
            
         # Format the PM time columns into 12 hour clock format
         [self._date_parser(self.df[column_name]) for column_name in datetime_str_columns]        
@@ -100,15 +109,19 @@ class CSVDataFrame(MyDataFrame):
             self.df[column] = self.df[column].dropna()
             self.df[column] = pd.to_numeric(self.df[column], errors = 'ignore')
 
-    def read_into_excel(self, input_name: str) -> Workbook:  
+    def read_into_excel(self, input_name):  
         """
         Reads a CSV into an Excel workbook. 
 
-        Parameters: 
-        input_name (str): Name of CSV 
+        Parameters
+        ----------
+        input_name : str
+            Name of CSV 
 
-        Returns: 
-        workbook: Holds the CSV in an Excel file 
+        Returns
+        ------- 
+        openpyxl.Workbook
+            Holds the CSV in an Excel file 
         """
 
         wb = Workbook()
@@ -120,14 +133,23 @@ class CSVDataFrame(MyDataFrame):
         
         wb.save(input_name + '.xlsx')
 
-    def _read_csv_type(self, startLine: int, stopLine: int, transpose: int) -> pd.DataFrame:
-        """Reads the CSV into a prototype dataframe 
-        Returns the prototype dataframe of the CSV 
+    def _read_csv_type(self, startLine, stopLine, transpose):
+        """Reads the CSV into a prototype dataframe. 
+        Returns the prototype dataframe of the CSV. 
         
-        Parameters: 
-        startLine (int): First line number read from CSV 
-        stopLine (int):  Last line number read from CSV
-        transpose (str): Determines whether df is to be transposed 
+        Parameters
+        ----------
+        startLine : int
+            First line number read from CSV 
+        stopLine : int
+            Last line number read from CSV
+        transpose : str
+            Determines whether df is to be transposed 
+
+        Returns
+        ------- 
+        pd.DataFrame
+            Prototype dataframe of the CSV 
         """ 
 
         # Read to the very end of the file and do not transpose CSV 
@@ -165,16 +187,21 @@ class CSVDataFrame(MyDataFrame):
                             encoding = 'ISO-8859-1') 
 
     
-    def _transpose(self, startLine: int, skipLine: bool): 
+    def _transpose(self, startLine, skipLine): 
             """
-            Transpose the dataframe  
+            Transpose the dataframe.  
 
-            Parameters: 
-            startLine (int): First line number read from CSV 
-            skipLine (bool): True if second line number (relative to startLine) is skipped
+            Parameters
+            -----------
+            startLine : int
+                First line number read from CSV 
+            skipLine : bool
+                True if second line number (relative to startLine) is skipped
 
-            Returns: 
-            dataframe: transposed dataframe
+            Returns
+            ------- 
+            pd.DataFrame
+                Transposed dataframe
             """
             # Logic to set the actual columns and indices in the transposed dataframe 
             self.df = self.df.transpose()
@@ -185,78 +212,104 @@ class CSVDataFrame(MyDataFrame):
             
             return self.df
        
-    def _search_for_pm_times(self):
-        """ Returns a list that stores all the titles of the columns that contain PM times"""
+    def _search_for_military_times(self): 
+        """
+        Goes through the self.df and searches for series whose values are 
+        str representations of miltiary datetimes 
 
-        # Search the first row of every column in the dataframe. If the data found is a string representation of 
-        # a datetime object, then there is the possibility that the time values in the columns are military time. 
-        # Try converting every string in the column value to a datetime object without an AM/PM, which 12 hour clock 
-        # formats possesses. If the conversion is successful, then add the label of the column to the list of 
-        # columns we need to reformat. 
+        Parameters 
+        ----------
+        None 
+        
+        Returns
+        -------
+        list
+            Contains the column labels of the columns with str representations of military datetimes
+        """
 
         datetime_str_column = []
-        
+        i = 0
         for column in self.df: 
             series = self.df[column]
-            try: 
-                for format in ('%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S'): 
-                    datetime_str = str(series.loc[0])
+            for format in ('%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %H:%M:%S.%f'): 
+                datetime_str = str(series.loc[0])
+                try: 
                     datetime.strptime(datetime_str, format)
                     datetime_str_column.append(column)
-            except ValueError: 
-                pass 
-            
+                except ValueError: 
+                    continue
+                i += 1
+    
         return datetime_str_column
         
     
-    def _date_parser(self, datetime_str_series):
-        """ Returns a series with its PM times formatted to look like AM times 
-        
-        Parameters: 
-        datetime_str_series (series): Contains PM times that needs to be reformatted  
+    def _date_parser(self, datetime_str_series) -> pd.Series:
         """
-
-        # Filter out AM time; they do not need to undergo re-formatting 
-        datetime_str_pm = datetime_str_series[~datetime_str_series.str.contains('AM')]
-        # Return a date format equal to the AM times 
+        Converts a series that holds string representations of military datetime into 
+        a series that holds string representations of standard datetime.   
+         
+        Parameters
+        ---------- 
+        datetime_str_series : pd.Series
+            Contains military times 
+        
+        Returns
+        -------
+        pd.Series
+            Str representation of standard datetime 
+        """
+        
+        # Drop empty columns so you don't get an index out of range error 
+        datetime_str_pm = datetime_str_series.replace('', np.nan).dropna()
+        
+        period = 'AM'
         for datetime_str in datetime_str_pm:  
+            
             datetime_str_list = datetime_str.split()
             date = datetime_str_list[0]
             time = datetime_str_list[1]
             time_list = time.split(':')
-            hours = str(int(time_list[0])-12)
+            
+            # Grab the hours
+            hours = int(time_list[0])
+            if (hours == 12): 
+                period = 'PM'
+            if (hours > 12): 
+                hours = str(hours-12)
+            
+            # Grab the minutes
             minutes = time_list[1]
+
+            # Grab the seconds 
             if (len(time_list) == 3): 
                 seconds = time_list[2]
             else: 
                 seconds = '00'
-            new_str = date + ' ' + hours + ':' +  minutes + ':' +  seconds + ' PM'   
+            
+            # Replace
+            new_str = date + ' ' + str(hours) + ':' +  minutes + ':' +  seconds + ' ' + period  
             datetime_str_series.replace(datetime_str, new_str, inplace=True)
-        return datetime_str_pm
+        return datetime_str_series
 
-
-    def map_columns(self): 
-        """Returns a dataframe that contains only the CSV columns that are being processed 
-
-        Parameters: 
-        raw_data_df (dataframe): dataframe of CSV 
-        title_inputs (series): Original titles of the processed CSV columns 
-        range_inputs (series): Interval of data we want read in each processed CSV column
+    def map_columns(self) -> pd.DataFrame: 
+        """Returns a dataframe that contains only the CSV columns that will be mapped
+        to the output files. 
         """
+
         title_inputs =  self.mapped_settings.get_column('Input')
         new_titles = self.mapped_settings.get_column('Title')
         range_inputs = self.mapped_settings.get_column('Range')
         format = self.mapped_settings.get_column('Format')
         raw_data = self.df.copy()
     
-        # Initialize an empty dataframe which will eventually store all mapped values 
+        # Initialize the dataframe that store the mapped values 
         mapped_df = pd.DataFrame()
         
         # Find size of dataframe column  
         max_size = raw_data.iloc[:,0].size
         
         # Determine the column with the largest range interval, whose index will be used for the entire dataframe. 
-        interval_index = self._largest_range_interval(range_inputs, max_size)
+        interval_index = self._largest_interval(range_inputs, max_size)
         range_list = self._find_range(range_inputs.loc[interval_index],max_size)
         start = range_list[0]
         end = range_list[1]
@@ -289,17 +342,26 @@ class CSVDataFrame(MyDataFrame):
 
         return mapped_df
     
-    def _round_numbers(self, series, round_to): 
-        """ Round numbers in 'series' to the number of decimal places indiciated by 'round_to'"""
+    def _round_numbers(self, series, round_to) -> pd.Series: 
+        """ Round numbers in the series to the number of decimal places indiciated by 'round_to.'"""
+
         series = series.round(round_to)
         return series
     
-    def _largest_range_interval(self, range_inputs, max_size):
-        """ Returns the row index of the largest range interval  
+    def _largest_interval(self, range_inputs, max_size):
+        """Determines the CSV column with the largest set interval. 
 
-        Parameters: 
-        range_inputs (series): Interval of data we want read in each processed CSV column
-        max_size (int) - Size of the CSV column 
+        Parameters
+        ---------- 
+        range_inputs : pd.Series
+            Interval of data set we want read into each processed CSV column
+        max_size : int 
+            Size of the CSV column 
+
+        Returns
+        ------- 
+        int
+            Row label of the CSV column with the largest set interval 
         """ 
         
         max_interval = 0
@@ -316,35 +378,43 @@ class CSVDataFrame(MyDataFrame):
         return max_interval_index
     
     def _find_range(self, current_range, max_size): 
-        """Returns a list of the interval of data we want processed in a CSV column.
+        """Gives the starting and ending row index of the column's data interval. 
 
-        The first elment in the list is the starting row index, the second element is the ending row index. 
+        Parameters
+        ---------- 
+        current_range : float
+            The interval of the data to be read in 'start:end' format (inclusive)
+        max_size : int
+            Size of the CSV column 
 
-        Parameters: 
-        current_range (float): The interval of the data to be read in 'start:end' format (inclusive)
-        max_size (int) - Size of the CSV column 
+        Returns
+        ------- 
+        list
+            First element gives the starting row index, second element gives the ending row 
+            index
         """
         
         start = 0 
         end = max_size
-        # Range is calculated against the row indexes of the Excel worksheet. Thus, the first
-        # cell in a column will be located in row 2.   
+ 
         if (pd.isnull(current_range)): 
             pass
         else: 
             range_list = current_range.split(':')
-            # Start at the very beginning and stop at a certain point 
+            
+            # Start at the very beginning and stop at a specific line number
             if (range_list[0] == ''):
                 end = int(range_list[1])
             
-            # Start at a certain point and go to the very end 
+            # Start at a specific line number and go to the very end 
             elif (range_list[1] == ''): 
                 start = int(range_list[0]) - 1 #- self.get_startRow()
             
-            # Start and stop at certain points
+            # Start and stop at specific line numbers
             else: 
                 start = int(range_list[0]) - 1 #- self.get_startRow()
                 end = int(range_list[1])
+
             # Final check to make sure intervals are not out of bounds 
             #if (self.get_start_row() - start < 0):
              #   start = 0 
@@ -354,10 +424,18 @@ class CSVDataFrame(MyDataFrame):
         return [start,end]
     
     def convert_to_elapsed_time(self, output_df):
-        """ Returns output_df with the time values converted into elapsed times
+        """Returns output_df with the str representations of datetime objects converted into 
+        timedelta objects. 
         
-        Parameters: 
-        output_df(df): df that contains the values to be converted 
+        Parameters
+        ---------- 
+        output_df : pd.DataFrame
+            Contains only the colums we want processed in the CSV  
+
+        Returns
+        ------- 
+        pd.DataFrame
+            Time columns are converted into elapsed times
         """ 
 
         # Grab the time units of the columns whose values is to be converted into elapsed times 
@@ -368,7 +446,6 @@ class CSVDataFrame(MyDataFrame):
             
             # 'index' contains the indices of the time columns in mapped_settings ('Sheet 1' of the configuration file) 
             all_time_indices = time_units_df.index.values
-            #all_time_titles = self.mapped_settings.letter2int(self.mapped_settings.get_column('Input Column Numbers'))
             all_time_titles = self.mapped_settings.get_column('Input Column Numbers')
             
             # Iterate through all the time columns 
@@ -399,18 +476,31 @@ class CSVDataFrame(MyDataFrame):
         return output_df
 
     def _convert_to_elapsed_time_str_series(self, series, unit):
-        """Returns a series that contains a str representation of a time object in %H:%M:%S format 
+        """Converts the values in a series into str representations of timedelta objects.  
 
-        Parameters: 
-        series (Series): The CSV column that is to be converted. Will either contain floats 
-                            or a datetime object in %m/%d/%Y %H:%M:%S AM/PM format. 
-        unit (str): The unit of time of the CSV column. D = datetime, H = hours, M = minutes, S = seconds 
+        Helper function to convert_to_elapsed_time(). 
+
+        Parameters
+        ---------- 
+        series : pd.Series
+            The CSV column that is to be converted. Will either contain floats 
+            or a str representation of a datetime object in %m/%d/%Y %H:%M:%S AM/PM format. 
+        unit : str
+            The unit of time of the CSV column. D = datetime, H = hours, M = minutes, 
+            S = seconds
+
+        Returns
+        ------- 
+        pd.Series 
+            Contains a str representation of a timedelta object in %H:%M:%S format 
         """
 
         series = series.dropna()
 
+        #FIXME: Takes up too much space 
         # Creating a copy of 'series' to be iterated over. That way even if two cells have the same datetime, 
-        # and both cells are replaced in the original 'series,' the for loop will not break when we iterate over the second copy.  
+        # and both cells are replaced in the original 'series,' the for loop will not break when we iterate 
+        # over the second copy.  
         series_copy = series.copy()
 
         # If the time series is a datetime object....
@@ -433,14 +523,23 @@ class CSVDataFrame(MyDataFrame):
         return series
     
     def _get_hours_minutes_seconds(self, time, time_unit):
-        """Returns a list that holds the hours, minutes, and seconds of the given time. 
+        """Splits a single time unit into its hours, minutes, and seconds. 
 
         Takes in a float representation of a a single unit of time, converts it into an integer, and 
         returns a list of the original time in %H:%M:%S format. 
 
-        Parameters: 
-        time (float): Given time to be converted
-        time_unit: The unit of time that the given time is in
+        Helper function to convert_to_elapsed_times(). 
+
+        Parameters
+        ---------- 
+        time : float 
+            Given time to be converted
+        time_unit : str
+            The unit of time that the given 'time' is in
+
+        Returns: 
+        list
+            Holds the hours, minutes, and seconds of the given 'time' 
         """
         
         if (time_unit.upper() == 'H'): 
@@ -456,19 +555,28 @@ class CSVDataFrame(MyDataFrame):
         return [hours,minutes,seconds]
 
     def _convert_to_timedelta(self, time_series, start_time): 
-        """Returns a series that contains timedelta objects. 
+        """Converts values in a series into timedelta objects. 
 
-        Takes in a str series in %H:%M:%S format and returns a time series that gives the elapsed time in the same format. 
+        Helper function to convert_to_elapsed_times(). 
 
-        Parameters: 
-        time_series (series): str representation of time in %H:%M:%S
+        Parameters
+        ----------
+        time_series : pd.Series
+            Contains str representations of timedelta objects.  
+        start_time : str
+            Str representation of starting time in the original dataframe
+
+        Returns
+        ------- 
+        None  
         """
 
         time_series_modified = time_series.dropna()
         start_time = pd.to_timedelta(start_time)
 
-        # Iterate through 'time_series_modified' which has the NaN values dropped but replace the str with the timedelta in 
-        # the original 'time_series.'
+        # Iterate through 'time_series_modified' which has the NaN values dropped. 
+        # Should still replace the str representation with the timedelta object in 
+        # the original 'time_series'
         for current_time in time_series_modified: 
             
             # Convert the str 'current_time' into a timedelta object and find the difference between 'current_time' and 'start_time'
@@ -477,7 +585,8 @@ class CSVDataFrame(MyDataFrame):
             difference= str(pd.to_timedelta(current_time)-start_time)
             difference_list = difference.split()
             
-            # Store the time portion of the str into 'elapsed_time' and use the colon delimiter to split the time into a list 
+            # Store the time portion of the str into 'elapsed_time' and use the colon delimiter to 
+            # split the time into a list.  
             elapsed_time = difference_list[2]
             elapsed_time_list = elapsed_time.split(':')
             
